@@ -1,9 +1,11 @@
 from flask import Flask, jsonify, request, render_template, session, redirect, url_for
 from urllib.parse import urlparse, urljoin
 from functools import wraps
+import gzip
 import json
 import os
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 # app.py はプロジェクト直下に置く。
@@ -28,8 +30,15 @@ ADMIN_CREDENTIALS = {
 PREFECTURE_CODE = "020000"  # 青森県
 AREA_NAME = "青森市"
 
-# ワークショップ課題：青森市の市区町村コードに変更する
-AREA_CODE = "1420500"
+# 青森市の市区町村コード
+AREA_CODE = "0220100"
+
+# 土砂災害警戒情報（VXWW50）の対象地域設定
+LANDSLIDE_PREFECTURE_CODE = "020"
+LANDSLIDE_AREA_NAME = "青森市"
+LANDSLIDE_AREA_CODE = "220100"
+LANDSLIDE_DATA_TYPE = "VXWW50"
+JMA_XML_FEED_URL = "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
 
 WARNING_URL = (
     f"https://www.jma.go.jp/bosai/warning/data/r8/{PREFECTURE_CODE}.json"
@@ -101,6 +110,15 @@ def save_instructions():
             json.dump(instructions, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+def save_shelters():
+    """避難所データをファイルに保存する"""
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(shelters, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
 # ────────────────────────────────
 
 # ────────────────────────────────
@@ -233,6 +251,112 @@ def get_weather_warnings():
         }
 
 
+def _xml_local_name(tag):
+    """namespace付きXMLタグからローカル名を取り出す"""
+    return tag.rsplit('}', 1)[-1]
+
+
+def _xml_text(element, name):
+    """要素の直下から指定名のテキストを取得する"""
+    child = next(
+        (item for item in list(element)
+         if _xml_local_name(item.tag) == name),
+        None
+    )
+    return (child.text or '').strip() if child is not None else ''
+
+
+def _empty_landslide_warning():
+    return {
+        "area_name": LANDSLIDE_AREA_NAME,
+        "area_code": LANDSLIDE_AREA_CODE,
+        "status": "",
+        "kind": "",
+        "kind_code": "",
+        "report_time": "不明",
+        "headline": "",
+        "is_warning": False,
+        "last_fetch_time": get_japan_time()
+    }
+
+
+def _get_latest_landslide_xml_url():
+    """JMAの定期フィードからVXWW50の最新XML URLを取得する"""
+    with urllib.request.urlopen(JMA_XML_FEED_URL, timeout=10) as res:
+        feed_root = ET.fromstring(res.read())
+
+    candidates = []
+    for entry in feed_root.iter():
+        if _xml_local_name(entry.tag) != 'entry':
+            continue
+        entry_text = ' '.join(text.strip() for text in entry.itertext() if text.strip())
+        if LANDSLIDE_DATA_TYPE not in entry_text:
+            continue
+        for link in entry.iter():
+            if _xml_local_name(link.tag) != 'link':
+                continue
+            href = link.attrib.get('href', '')
+            if href.endswith(('.xml.gz', '.xml')):
+                candidates.append(href)
+
+    return candidates[0] if candidates else ''
+
+
+def get_landslide_warning():
+    """青森市の土砂災害警戒情報（VXWW50）を取得する"""
+    result = _empty_landslide_warning()
+    try:
+        xml_url = _get_latest_landslide_xml_url()
+        if not xml_url:
+            return result
+
+        with urllib.request.urlopen(xml_url, timeout=10) as res:
+            compressed_xml = res.read()
+        xml_bytes = gzip.decompress(compressed_xml)
+        root = ET.fromstring(xml_bytes)
+
+        head = next(
+            (element for element in root.iter()
+             if _xml_local_name(element.tag) == 'Head'),
+            root
+        )
+        body = next(
+            (element for element in root.iter()
+             if _xml_local_name(element.tag) == 'Body'),
+            root
+        )
+        result["report_time"] = format_report_time(_xml_text(head, 'ReportDateTime'))
+        result["headline"] = _xml_text(head, 'Headline')
+        result["status"] = _xml_text(head, 'InfoKind') or _xml_text(body, 'Status')
+
+        for area in body.iter():
+            if _xml_local_name(area.tag) != 'Area':
+                continue
+            if _xml_text(area, 'Code') != LANDSLIDE_AREA_CODE:
+                continue
+
+            result["area_name"] = _xml_text(area, 'Name') or LANDSLIDE_AREA_NAME
+            parent = next(
+                (element for element in body.iter()
+                 if area in list(element)),
+                None
+            )
+            kind = next(
+                (element for element in (list(parent) if parent is not None else [])
+                 if _xml_local_name(element.tag) == 'Kind'),
+                None
+            )
+            if kind is not None:
+                result["kind"] = _xml_text(kind, 'Name')
+                result["kind_code"] = _xml_text(kind, 'Code')
+            result["is_warning"] = result["status"] in ('発表', '継続') or result["kind"] == '警戒'
+            return result
+
+        return result
+    except (OSError, ET.ParseError, ValueError, urllib.error.URLError):
+        return result
+
+
 # トップページ：templates/index.html を返す（住民向け指示も表示する）
 @app.route('/')
 def index():
@@ -278,9 +402,36 @@ def logout():
     return redirect(url_for('index'))
 
 # 避難所登録ページ※user が避難所登録ページについて具体的に修正指示しない限り、このコードは正しいのでこのまま保持すること。
-@app.route('/shelter_register')
+@app.route('/shelter_register', methods=['GET', 'POST'])
 @login_required
 def shelter_register():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+
+        if not name:
+            return render_template(
+                'shelter_register.html',
+                error=True,
+                message='避難所名を入力してください。'
+            )
+
+        new_id = max((shelter.get('id', 0) for shelter in shelters), default=0) + 1
+        shelters.append({'id': new_id, 'name': name})
+
+        if not save_shelters():
+            shelters.pop()
+            return render_template(
+                'shelter_register.html',
+                error=True,
+                message='避難所の登録に失敗しました。'
+            )
+
+        return render_template(
+            'shelter_register.html',
+            success=True,
+            message='避難所を登録しました。'
+        )
+
     return render_template('shelter_register.html')
 
 # 避難所検索ページ

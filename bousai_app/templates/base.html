@@ -4,31 +4,115 @@
   <meta charset="utf-8">
   <title>{% block title %}防災アプリ{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      --primary-blue: #2459ad;
+      --deep-blue: #1d4d9c;
+      --page-bg: #f7f9fc;
+      --text: #25344a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page-bg);
+      color: var(--text);
+      font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 70px;
+      padding: 0 max(24px, calc((100vw - 1360px) / 2));
+      color: #fff;
+      background: linear-gradient(115deg, var(--deep-blue), #3264b6);
+      box-shadow: 0 2px 8px rgba(21, 55, 111, 0.18);
+    }
+
+    .app-title {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: 0.04em;
+    }
+
+    .menu-toggle {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .menu-toggle span {
+      display: block;
+      width: 23px;
+      height: 3px;
+      border-radius: 2px;
+      background: #fff;
+    }
+
+    .site-nav {
+      display: none;
+      padding: 12px max(24px, calc((100vw - 1360px) / 2));
+      background: #fff;
+      border-bottom: 1px solid #dfe6f0;
+      text-align: right;
+    }
+
+    .site-nav.is-open { display: block; }
+
+    .site-nav a {
+      margin-left: 18px;
+      color: var(--primary-blue);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    main { min-height: calc(100vh - 70px); }
+
+    @media (max-width: 600px) {
+      .app-header { min-height: 60px; padding: 0 16px; }
+      .app-title { font-size: 21px; }
+      .site-nav { padding: 10px 16px; text-align: left; }
+      .site-nav a { display: block; margin: 8px 0; }
+    }
+  </style>
 </head>
 <body>
-  <!-- ヘッダー -->
-  <h1>防災アプリ</h1>
+  <header class="app-header">
+    <h1 class="app-title">防災アプリ</h1>
+    <button class="menu-toggle" type="button" aria-label="メニューを開く" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span><span></span>
+    </button>
+  </header>
 
-  <!-- ナビゲーション -->
-  <nav>
-    <a href="/">ホーム</a> |
-    <a href="/shelter_search">避難所検索</a> |
-    <a href="/shelter_register">避難所登録</a> |
+  <nav class="site-nav" id="siteNav">
+    <a href="/">ホーム</a>
+    <a href="/shelter_search">避難所検索</a>
+    <a href="/shelter_register">避難所登録</a>
     <a href="/board">指示・発信ボード</a>
-    ｜
     {% if session.logged_in %}
-      ログイン中{% if session.username %}（{{ session.username }}）{% endif %}
       <a href="/logout">ログアウト</a>
     {% else %}
-      未ログイン
       <a href="/login">ログイン</a>
     {% endif %}
   </nav>
-  <hr>
 
   <main>
-    <!-- ここに子テンプレートの content が入る -->
     {% block content %}{% endblock %}
   </main>
+  <script>
+    const menuToggle = document.querySelector('.menu-toggle');
+    const siteNav = document.querySelector('#siteNav');
+    menuToggle.addEventListener('click', function() {
+      const isOpen = siteNav.classList.toggle('is-open');
+      menuToggle.setAttribute('aria-expanded', isOpen);
+    });
+  </script>
 </body>
 </html>
