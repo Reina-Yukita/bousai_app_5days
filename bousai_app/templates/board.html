@@ -17,35 +17,36 @@
   {% if session.logged_in %}
   <details class="board-panel board-create" open>
     <summary>新規発信</summary>
+    {% if error == 'content' %}<p class="error-message" role="alert">内容を入力してください。</p>{% elif error == 'area' %}<p class="error-message" role="alert">対象地域を選択してください。</p>{% endif %}
     <form action="{{ url_for('board_create') }}" method="post">
       <fieldset>
         <legend>発信内容</legend>
         <div class="input-mode" role="group" aria-label="入力方式">
-          <label><input type="radio" name="input_mode" value="free" checked>自由入力</label>
-          <label><input type="radio" name="input_mode" value="template">指示内容を選択</label>
+          <label><input type="radio" name="input_mode" value="free" {% if form_data.get('input_mode', 'free') == 'free' %}checked{% endif %}>自由入力</label>
+          <label><input type="radio" name="input_mode" value="template" {% if form_data.get('input_mode') == 'template' %}checked{% endif %}>指示内容を選択</label>
         </div>
-        <div class="input-mode-panel" data-mode="free">
+        <div class="input-mode-panel" data-mode="free" {% if form_data.get('input_mode') == 'template' %}hidden{% endif %}>
           <label for="content">内容</label>
-          <textarea id="content" name="content" rows="4" maxlength="500" placeholder="発信内容を入力してください"></textarea>
+          <textarea id="content" name="content" rows="4" maxlength="500" placeholder="発信内容を入力してください">{{ form_data.get('content', '') }}</textarea>
           <div class="multilingual-inputs">
             <label for="content_en">English <span class="field-note">任意</span></label>
-            <textarea id="content_en" name="content_en" rows="2" maxlength="500" placeholder="English message"></textarea>
+            <textarea id="content_en" name="content_en" rows="2" maxlength="500" placeholder="English message">{{ form_data.get('content_en', '') }}</textarea>
             <label for="content_zh">中文 <span class="field-note">任意</span></label>
-            <textarea id="content_zh" name="content_zh" rows="2" maxlength="500" placeholder="中文内容"></textarea>
+            <textarea id="content_zh" name="content_zh" rows="2" maxlength="500" placeholder="中文内容">{{ form_data.get('content_zh', '') }}</textarea>
             <label for="content_ko">한국어 <span class="field-note">任意</span></label>
-            <textarea id="content_ko" name="content_ko" rows="2" maxlength="500" placeholder="한국어 내용"></textarea>
+            <textarea id="content_ko" name="content_ko" rows="2" maxlength="500" placeholder="한국어 내용">{{ form_data.get('content_ko', '') }}</textarea>
           </div>
           <fieldset class="urgency-options">
             <legend>緊急度</legend>
-            <label><input type="radio" name="urgency" value="高"> 高</label>
-            <label><input type="radio" name="urgency" value="中"> 中</label>
-            <label><input type="radio" name="urgency" value="低" checked> 低</label>
+            <label><input type="radio" name="urgency" value="高" {% if form_data.get('urgency') == '高' %}checked{% endif %}> 高</label>
+            <label><input type="radio" name="urgency" value="中" {% if form_data.get('urgency') == '中' %}checked{% endif %}> 中</label>
+            <label><input type="radio" name="urgency" value="低" {% if form_data.get('urgency', '低') == '低' %}checked{% endif %}> 低</label>
           </fieldset>
         </div>
-        <div class="input-mode-panel" data-mode="template" hidden>
+        <div class="input-mode-panel" data-mode="template" {% if form_data.get('input_mode') != 'template' %}hidden{% endif %}>
           <label for="template_content">テンプレート</label>
           <select id="template_content" name="template_content">
-            {% for item in templates %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+            {% for item in templates %}<option value="{{ item }}" {% if form_data.get('template_content') == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
           </select>
         </div>
       </fieldset>
@@ -53,18 +54,18 @@
         <summary>対象地域を選択</summary>
         <fieldset class="shelter-check-list">
           <legend class="visually-hidden">対象地域</legend>
-          {% for area in areas %}<label><input type="checkbox" name="areas" value="{{ area }}"> {{ area }}</label>
+          {% for area in areas %}<label data-area-value="{{ area }}"><input type="checkbox" name="areas" value="{{ area }}" {% if area in form_data.getlist('areas') %}checked{% endif %}> {{ area }}</label>
           {% else %}<span class="field-note">登録されている避難所町名はありません。</span>{% endfor %}
         </fieldset>
       </details>
-      <fieldset id="shelter-selection" hidden>
-        <legend>避難先 <span class="field-note">任意</span></legend>
+      <details id="shelter-selection" class="board-area-picker" hidden>
+        <summary>避難先を選択 <span class="field-note">任意</span></summary>
         <div class="shelter-check-list">
           {% for shelter in shelters %}
-          <label data-shelter-district="{{ shelter.district|default('')|trim }}" data-shelter-address="{{ shelter.address|default('')|trim }}"><input type="checkbox" name="shelters" value="{{ shelter.name }}">{{ shelter.name }}</label>
+          <label data-shelter-district="{{ shelter.district|default('')|trim }}" data-shelter-address="{{ shelter.address|default('')|trim }}"><input type="checkbox" name="shelters" value="{{ shelter.name }}" {% if shelter.name in form_data.getlist('shelters') %}checked{% endif %}>{{ shelter.name }}</label>
           {% else %}<span class="field-note">登録されている避難所はありません。</span>{% endfor %}
         </div>
-      </fieldset>
+      </details>
       <button class="button" type="submit">発信する</button>
     </form>
   </details>
@@ -119,22 +120,22 @@
       </div>
       <aside class="board-filter-panel" aria-label="発信一覧のフィルタ">
         <h4>フィルタ</h4>
-        <details class="filter-group" open>
+        <details class="filter-group">
           <summary>状態</summary>
           <label><input type="checkbox" name="filter_status" value="発信中" checked> 発信中</label>
           <label><input type="checkbox" name="filter_status" value="解除済" checked> 解除済</label>
         </details>
-        <details class="filter-group" open>
+        <details class="filter-group">
           <summary>緊急度</summary>
           <label><input type="checkbox" name="filter_urgency" value="高" checked> 高</label>
           <label><input type="checkbox" name="filter_urgency" value="中" checked> 中</label>
           <label><input type="checkbox" name="filter_urgency" value="低" checked> 低</label>
         </details>
-        <details class="filter-group" open>
+        <details class="filter-group">
           <summary>対象地域</summary>
           {% for area in areas %}<label><input type="checkbox" name="filter_area" value="{{ area }}" checked> {{ area }}</label>{% endfor %}
         </details>
-        <details class="filter-group" open>
+        <details class="filter-group">
           <summary>避難所</summary>
           {% for shelter in shelters %}<label><input type="checkbox" name="filter_shelter" value="{{ shelter.name }}" checked> {{ shelter.name }}</label>{% endfor %}
         </details>
@@ -164,6 +165,11 @@
     if (![...selected()].some(item => item.checked)) { event.preventDefault(); }
   }));
   const areaChecks = [...document.querySelectorAll('input[name="areas"]')];
+  const allAreaCheck = areaChecks.find(input => input.value === '全域');
+  const otherAreaLabels = areaChecks
+    .filter(input => input.value !== '全域')
+    .map(input => input.closest('label'))
+    .filter(Boolean);
   const shelterLabels = [...document.querySelectorAll('[data-shelter-district]')];
   const shelterSelection = document.querySelector('#shelter-selection');
   function matchesAreaFilter(shelterLabel, selectedAreas) {
@@ -172,10 +178,19 @@
     return selectedAreas.some(area => {
       const areaValue = area.trim();
       if (!areaValue) return false;
-      return (district && district.includes(areaValue)) || (address && address.includes(areaValue)) || (areaValue.includes(district)) || (areaValue.includes(address));
+      if (areaValue === '全域' || areaValue === '青森市全域') return true;
+      return district === areaValue || address.includes(areaValue);
     });
   }
   function updateShelterChoices() {
+    if (allAreaCheck?.checked) {
+      areaChecks.filter(input => input !== allAreaCheck).forEach(input => {
+        input.checked = false;
+      });
+      otherAreaLabels.forEach(label => { label.hidden = true; });
+    } else {
+      otherAreaLabels.forEach(label => { label.hidden = false; });
+    }
     const selectedAreas = areaChecks.filter(input => input.checked).map(input => input.value);
     if (shelterSelection) shelterSelection.hidden = selectedAreas.length === 0;
     shelterLabels.forEach(label => {
@@ -204,7 +219,7 @@
       const matchesStatus = statusFilter.length === 0 || statusFilter.includes(status);
       const matchesUrgency = urgencyFilter.length === 0 || urgencyFilter.includes(urgency);
       const matchesArea = areaFilter.length === 0 || areaFilter.includes(area);
-      const matchesShelter = shelterFilter.length === 0 || shelters.some(value => shelterFilter.includes(value));
+      const matchesShelter = shelters.length === 0 || shelterFilter.length === 0 || shelters.some(value => shelterFilter.includes(value));
       row.hidden = !(matchesStatus && matchesUrgency && matchesArea && matchesShelter);
     });
   }

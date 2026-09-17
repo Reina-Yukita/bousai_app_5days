@@ -25,11 +25,12 @@
   <div class="shelter-result-list">
     {% for shelter in results %}
     {% set matched = shelter._matched_facilities %}
-    <article class="shelter-result-card{% if selected_facilities and matched %} shelter-result-card--matched{% else %} shelter-result-card--muted{% endif %}" data-marker-index="{{ loop.index0 }}" tabindex="0" role="button" aria-label="{{ shelter.name }}を地図で表示">
+    <article class="shelter-result-card{% if selected_facilities and matched %} shelter-result-card--matched{% else %} shelter-result-card--muted{% endif %}" data-shelter-id="{{ shelter.id }}" tabindex="0" role="button" aria-label="{{ shelter.name }}を地図で表示">
       <div class="shelter-result-card__heading">
         <h3>{{ shelter.name }}</h3>
         {% set availability = shelter.availability|default('普通', true) %}
         <span class="availability availability--{{ 'full' if availability == '満員' else 'available' if availability == '余裕あり' else 'normal' }}">
+          <strong class="availability-label">混雑状況</strong>
           <span aria-hidden="true">{{ '😣😣😣' if availability == '満員' else '🙂' if availability == '余裕あり' else '😐😐' }}</span>
           {{ availability }}
         </span>
@@ -37,7 +38,9 @@
       {% if shelter.address or shelter.district %}<p class="shelter-result-card__address">{{ shelter.district }} {{ shelter.address }}</p>{% endif %}
       <div class="shelter-result-card__stats" aria-label="避難所の状況">
         <span><strong>最大収容人数</strong> {{ shelter.capacity|default('未登録', true) }}人</span>
-        <span><strong>物資</strong> {{ shelter.supplies|default('十分足りている', true) }}</span>
+        {% set supplies = shelter.supplies|default('十分足りている', true) %}
+        {% set supply_level = 4 if supplies == '十分足りている' else 3 if supplies == '足りている' else 2 if supplies == '足りていない' else 1 %}
+        <span class="supply-status" aria-label="物資 {{ supplies }}"><strong>物資</strong><span class="supply-bottles" aria-hidden="true">{% for level in range(1, 5) %}<svg class="icon supply-bottle{% if level > supply_level %} supply-bottle--empty{% endif %}"><use href="#icon-bottle"></use></svg>{% endfor %}</span></span>
       </div>
       {% if selected_facilities %}<p class="match-count">選択条件との一致: {{ matched }}件</p>{% endif %}
       <div class="facility-tags" aria-label="設備・条件">
@@ -65,19 +68,27 @@ document.addEventListener('DOMContentLoaded', function() {
     attribution: '© OpenStreetMap contributors',
     referrerPolicy: 'strict-origin-when-cross-origin'
   }).addTo(map);
-  const shelters = {{ results|tojson }};
-  const markers = [];
-  shelters.forEach(function(shelter, index) {
-    const latitude = Number(shelter.latitude) || center[0] + (index % 3 - 1) * 0.012;
-    const longitude = Number(shelter.longitude) || center[1] + (Math.floor(index / 3) - 0.5) * 0.018;
-    const popup = document.createElement('strong');
-    popup.textContent = shelter.name || '避難所';
-    const marker = L.marker([latitude, longitude]).addTo(map).bindPopup(popup);
-    markers.push(marker);
-  });
-  document.querySelectorAll('[data-marker-index]').forEach(function(card) {
+  const shelterIds = {{ results|map(attribute='id')|list|tojson }};
+  const markers = new Map();
+  fetch(`{{ url_for('shelter_locations') }}?ids=${shelterIds.join(',')}`)
+    .then(function(response) {
+      if (!response.ok) throw new Error('shelter locations failed');
+      return response.json();
+    })
+    .then(function(points) {
+      points.forEach(function(point) {
+        const latitude = Number(point.latitude);
+        const longitude = Number(point.longitude);
+        if (Number.isNaN(latitude) || Number.isNaN(longitude)) return;
+        const popup = document.createElement('strong');
+        popup.textContent = point.name || '避難所';
+        const marker = L.marker([latitude, longitude]).addTo(map).bindPopup(popup);
+        markers.set(String(point.id), marker);
+      });
+    });
+  document.querySelectorAll('[data-shelter-id]').forEach(function(card) {
     function showShelter() {
-      const marker = markers[Number(card.dataset.markerIndex)];
+      const marker = markers.get(card.dataset.shelterId);
       if (!marker) return;
       map.setView(marker.getLatLng(), Math.max(map.getZoom(), 14));
       marker.openPopup();

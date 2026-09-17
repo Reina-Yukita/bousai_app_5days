@@ -29,6 +29,45 @@
   </article>
 </section>
 
+<section class="board-page home-board" aria-labelledby="homeBoardTitle">
+  <div class="board-heading">
+    <p class="section-eyebrow">COMMUNITY NOTICES</p>
+    <div class="home-board-heading-row">
+      <div>
+        <h2 id="homeBoardTitle">指示・発信ボード</h2>
+        <p>市民向けに発信されている防災情報を確認できます。</p>
+      </div>
+      <a class="text-link" href="{{ url_for('board') }}">ボードを開く →</a>
+    </div>
+  </div>
+  <section class="board-panel board-list" aria-labelledby="homeBoardListTitle">
+    <div class="board-list-heading">
+      <h3 id="homeBoardListTitle">発信一覧</h3>
+      <span class="field-note">{{ instructions|length }}件</span>
+    </div>
+    {% if instructions %}
+    <div class="board-table-wrap home-board-table-wrap">
+      <table class="board-table home-board-table">
+        <thead>
+          <tr><th>緊急度</th><th>状態</th><th>対象地域</th><th>内容</th><th>発信日時</th></tr>
+        </thead>
+        <tbody>
+          {% for item in instructions %}
+          <tr class="urgency-row--{{ 'high' if item.urgency == '高' else 'medium' if item.urgency == '中' else 'low' }}{% if item.status == '解除済' %} is-resolved{% endif %}">
+            <td><span class="urgency-label urgency-label--{{ 'high' if item.urgency == '高' else 'medium' if item.urgency == '中' else 'low' }}">{{ item.urgency }}</span></td>
+            <td><span class="status-label">{{ item.status }}</span></td>
+            <td>{{ item.area }}</td>
+            <td class="board-content">{{ item.content }}</td>
+            <td>{{ item.created_at_display or item.created_at or '－' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<p class="empty-state">登録されている発信はありません。</p>{% endif %}
+  </section>
+</section>
+
 <section class="quick-links" aria-labelledby="quickAccessTitle">
   <div class="section-heading"><div><p class="section-eyebrow">{{ t('home_quick_access_label') }}</p><h2 id="quickAccessTitle">{{ t('home_quick_access') }}</h2></div></div>
   <div class="link-grid">
@@ -45,41 +84,24 @@ document.addEventListener('DOMContentLoaded', function() {
   const center = [40.8244, 140.7400];
   const map = L.map('shelterMap').setView(center, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors', referrerPolicy: 'strict-origin-when-cross-origin' }).addTo(map);
-  const shelters = {{ shelters|tojson }};
-
-  function geocodeShelter(shelter, index) {
-    const addressText = [shelter.district, shelter.address].filter(Boolean).join(', ');
-    const query = encodeURIComponent(addressText || shelter.name || '青森市');
-    return fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`, {
-      headers: { Accept: 'application/json' }
-    }).then(function(response) {
-      if (!response.ok) throw new Error('geocode failed');
+  fetch('{{ url_for('shelter_locations') }}')
+    .then(function(response) {
+      if (!response.ok) throw new Error('shelter locations failed');
       return response.json();
-    }).then(function(results) {
-      if (!results.length) {
-        throw new Error('no result');
-      }
-      const match = results[0];
-      return {
-        name: shelter.name,
-        latitude: Number(match.lat),
-        longitude: Number(match.lon)
-      };
-    }).catch(function() {
-      return {
-        name: shelter.name,
-        latitude: center[0] + (index % 3 - 1) * 0.012,
-        longitude: center[1] + (Math.floor(index / 3) - 0.5) * 0.018
-      };
-    });
-  }
-
-  Promise.all(shelters.map(geocodeShelter)).then(function(points) {
+    })
+    .then(function(points) {
+      const bounds = [];
     points.forEach(function(point) {
       if (!point || Number.isNaN(point.latitude) || Number.isNaN(point.longitude)) return;
-      L.marker([point.latitude, point.longitude]).addTo(map).bindPopup(`<strong>${point.name}</strong>`);
+      const position = [point.latitude, point.longitude];
+      L.marker(position).addTo(map).bindPopup(`<strong>${point.name}</strong>`);
+      bounds.push(position);
     });
-  });
+      if (bounds.length) map.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
+    })
+    .catch(function() {
+      // 住所を確認できない場合は、誤った位置にピンを表示しない。
+    });
 
   function updateWeather(data) {
     const content = document.querySelector('#weatherContent');
@@ -92,12 +114,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const warningList = warnings.length
       ? `<ul class="warning-list">${warnings.map(warning => `<li class="warning-item level-${warning.level || 2}"><strong>${warning.name}</strong><span class="level-label">レベル${warning.level || 2}</span></li>`).join('')}</ul>`
       : '<p class="weather-status"><span class="check">✓</span>現在、警報・注意報は発表されていません</p>';
-    content.innerHTML = `<p class="weather-city"><svg class="icon"><use href="#icon-pin"></use></svg>${data.area_name || '青森市'}</p>${warningList}<p class="weather-detail"><svg class="icon"><use href="#icon-clock"></use></svg>データ取得: ${data.last_fetch_time || '不明'}</p><p class="weather-detail">気象庁発表: ${data.report_time || '不明'}</p><p class="weather-meta"><svg class="icon"><use href="#icon-clock"></use></svg>10分おきに自動更新</p>`;
+    content.innerHTML = `<p class="weather-city"><svg class="icon"><use href="#icon-pin"></use></svg>${data.area_name || '青森市'}</p>${warningList}<p class="weather-detail"><svg class="icon"><use href="#icon-clock"></use></svg>データ取得: ${data.last_fetch_time || '不明'}</p><p class="weather-detail">気象庁発表: ${data.report_time || '不明'}</p><p class="weather-meta"><svg class="icon"><use href="#icon-clock"></use></svg>10分おきに自動更新 <button class="weather-refresh" id="weatherRefresh" type="button">更新</button></p>`;
+    document.querySelector('#weatherRefresh')?.addEventListener('click', loadWeather);
     if (maxLevel >= 3) content.classList.add('has-alert');
   }
 
   function loadWeather() {
-    fetch('{{ url_for('api_weather_warnings') }}').then(response => response.json()).then(updateWeather).catch(() => updateWeather({error: true}));
+    const content = document.querySelector('#weatherContent');
+    content.classList.add('is-loading');
+    fetch('{{ url_for('api_weather_warnings') }}').then(response => response.json()).then(updateWeather).catch(() => updateWeather({error: true})).finally(() => content.classList.remove('is-loading'));
   }
   loadWeather();
   setInterval(loadWeather, 600000);

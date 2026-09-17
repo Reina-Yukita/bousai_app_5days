@@ -1,5 +1,67 @@
 [
   {
+    "id": 15,
+    "target": "住民",
+    "content": "今すぐ避難してください。",
+    "area": "堤",
+    "shelters": [
+      "リンクステーションホール青森（青森市文化会館）"
+    ],
+    "status": "発信中",
+    "resolved_at": null,
+    "created_at": "2026-09-17T17:03+09:00",
+    "updated_at": "2026-09-17T17:03+09:00",
+    "urgency": "高",
+    "translations": {}
+  },
+  {
+    "id": 14,
+    "target": "住民",
+    "content": "逃げてください",
+    "area": "千刈",
+    "shelters": [
+      "久須志福祉館"
+    ],
+    "status": "発信中",
+    "resolved_at": null,
+    "created_at": "2026-09-17T16:22+09:00",
+    "updated_at": "2026-09-17T16:22+09:00",
+    "urgency": "中",
+    "translations": {
+      "ja": "逃げてください"
+    }
+  },
+  {
+    "id": 8,
+    "target": "住民",
+    "content": "逃げて",
+    "area": "古川",
+    "shelters": [],
+    "status": "発信中",
+    "resolved_at": null,
+    "created_at": "2026-09-17T15:19+09:00",
+    "updated_at": "2026-09-17T15:19+09:00",
+    "urgency": "低",
+    "translations": {
+      "ja": "逃げて"
+    }
+  },
+  {
+    "id": 7,
+    "target": "住民",
+    "content": "周辺の安全を確認してください。",
+    "area": "古川",
+    "shelters": [
+      "古川避難所"
+    ],
+    "status": "発信中",
+    "resolved_at": null,
+    "created_at": "2026-09-17T15:16+09:00",
+    "updated_at": "2026-09-17T15:16+09:00",
+    "urgency": "中",
+    "translations": {}
+  },
+  {
     "id": 6,
     "target": "住民",
     "content": "避難してください",

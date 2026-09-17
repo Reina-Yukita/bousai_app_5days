@@ -5,10 +5,13 @@ from werkzeug.utils import secure_filename
 import gzip
 import json
 import os
+import random
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 
 # app.py はプロジェクト直下に置く。
 # 実体（templates / static / data）は bousai_app/ 配下にあるので、そこを参照する。
@@ -123,6 +126,7 @@ def load_json(path, default):
 
 shelters = load_json(DATA_FILE, [])
 instructions = load_json(INSTRUCTIONS_FILE, [])
+SHELTER_GEOCODE_CACHE = {}
 
 FACILITY_OPTIONS = {
     'shortest': '最短',
@@ -135,6 +139,9 @@ FACILITY_OPTIONS = {
     'air_conditioning': '空調完備',
     'large_facility': '大規模施設',
 }
+RANDOM_FACILITY_KEYS = tuple(
+    key for key in FACILITY_OPTIONS if key not in ('shortest', 'large_facility')
+)
 AVAILABILITY_OPTIONS = ('満員', '余裕あり', '普通')
 SUPPORTED_LANGUAGES = {
     'ja': '日本語',
@@ -152,7 +159,7 @@ LANGUAGE_TEXTS = {
         'nav_login': 'ログイン',
         'nav_logout': 'ログアウト',
         'hero_kicker': '防災・気象情報',
-        'brand': '防災アプリ',
+        'brand': '青森市防災web',
         'location_label': '青森市',
         'status_ok': '現在、警報・注意報はありません',
         'status_warning': '警報・注意報あり',
@@ -424,6 +431,11 @@ def board_instructions():
             if instruction.get('target', '住民') == '住民']
 
 
+def home_board_instructions():
+    return [instruction for instruction in board_instructions()
+            if instruction['urgency'] == '高']
+
+
 def selected_instruction_ids(form):
     return {value for value in form.getlist('selected_ids') if value}
 
@@ -435,6 +447,53 @@ def save_shelters():
         return True
     except Exception:
         return False
+
+
+def geocode_shelter(shelter):
+    """国土地理院の住所検索APIで避難所住所を座標に変換する"""
+    address = (shelter.get('address') or '').strip()
+    if not address:
+        return None
+    if address in SHELTER_GEOCODE_CACHE:
+        return SHELTER_GEOCODE_CACHE[address]
+
+    query = urlencode({'q': address})
+    try:
+        request = urllib.request.Request(
+            f'https://msearch.gsi.go.jp/address-search/AddressSearch?{query}',
+            headers={'Accept': 'application/json', 'User-Agent': 'bousai-app/1.0'},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            results = json.loads(response.read())
+        coordinates = results[0].get('geometry', {}).get('coordinates', []) if results else []
+        if len(coordinates) < 2:
+            return None
+        point = {'latitude': float(coordinates[1]), 'longitude': float(coordinates[0])}
+        SHELTER_GEOCODE_CACHE[address] = point
+        return point
+    except (OSError, ValueError, TypeError, IndexError, json.JSONDecodeError):
+        return None
+
+
+def shelter_map_points(selected_ids=None):
+    """住所から得た座標だけを地図表示用の形式で返す"""
+    source = current_shelters()
+    if selected_ids is not None:
+        source = [shelter for shelter in source if str(shelter.get('id')) in selected_ids]
+
+    def add_coordinates(shelter):
+        point = geocode_shelter(shelter)
+        if not point:
+            return None
+        return {'id': shelter.get('id'), 'name': shelter.get('name', ''), **point}
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        points = executor.map(add_coordinates, source)
+    return [point for point in points if point]
+
+def current_shelters():
+    """検索・一覧表示用に保存済みの最新避難所データを返す"""
+    return load_json(DATA_FILE, shelters)
 
 
 def shelter_form_data(form, image_path=''):
@@ -454,7 +513,16 @@ def shelter_form_data(form, image_path=''):
         data['availability'] = '普通'
     selected_facilities = set(form.getlist('facilities'))
     data.update({key: key in selected_facilities for key in FACILITY_OPTIONS})
+    data['large_facility'] = is_large_facility(data['capacity'])
     return data
+
+
+def is_large_facility(capacity):
+    """最大収容人数が1000人以上の避難所を大規模施設として扱う"""
+    try:
+        return int(str(capacity).strip()) >= 1000
+    except (TypeError, ValueError):
+        return False
 
 
 def normalize_shelter(shelter, index=0):
@@ -464,8 +532,15 @@ def normalize_shelter(shelter, index=0):
         shelter.get('availability')
         if shelter.get('availability') in AVAILABILITY_OPTIONS else '普通'
     )
-    normalized['supplies'] = '十分足りている'
+    normalized['supplies'] = (
+        shelter.get('supplies')
+        if shelter.get('supplies') in ('十分足りている', '足りている', '足りていない', '全く足りていない')
+        else '十分足りている'
+    )
     normalized.update({key: bool(shelter.get(key, False)) for key in FACILITY_OPTIONS})
+    randomizer = random.Random(f"shelter-facilities:{shelter.get('id', index)}")
+    normalized.update({key: randomizer.choice((False, True)) for key in RANDOM_FACILITY_KEYS})
+    normalized['large_facility'] = is_large_facility(shelter.get('capacity'))
     normalized['_registration_order'] = index
     return normalized
 
@@ -477,7 +552,7 @@ def search_shelters(args):
     municipality = args.get('municipality', '').strip()
     selected = [key for key in args.getlist('facility') if key in FACILITY_OPTIONS]
     results = []
-    for index, shelter in enumerate(shelters):
+    for index, shelter in enumerate(current_shelters()):
         item = normalize_shelter(shelter, index)
         if keyword and keyword not in item.get('name', ''):
             continue
@@ -509,6 +584,18 @@ def shelter_name_exists(name, exclude_id=None):
         shelter.get('name') == name and shelter.get('id') != exclude_id
         for shelter in shelters
     )
+
+
+def shelter_matches_area(shelter, area):
+    """避難所の町名または住所に対象地域が含まれるか判定する"""
+    if area in ('全域', '青森市全域'):
+        return True
+    area = (area or '').strip()
+    if not area:
+        return False
+    district = (shelter.get('district') or '').strip()
+    address = (shelter.get('address') or '').strip()
+    return area in district or area in address
 
 
 def save_uploaded_map(upload):
@@ -778,7 +865,14 @@ def set_language():
 
 @app.route('/')
 def index():
-    return render_template('index.html', shelters=shelters)
+    return render_template('index.html', instructions=home_board_instructions())
+
+
+@app.route('/api/shelter_locations')
+def shelter_locations():
+    requested_ids = request.args.get('ids')
+    selected_ids = set(requested_ids.split(',')) if requested_ids else None
+    return jsonify(shelter_map_points(selected_ids))
 
 # ログインページ
 @app.route('/login', methods=['GET', 'POST'])
@@ -837,7 +931,8 @@ def shelter_register():
 @login_required
 def shelter_edit_search():
     keyword = request.values.get('keyword', '').strip()
-    results = [shelter for shelter in shelters if keyword in shelter.get('name', '')] if keyword else []
+    current = current_shelters()
+    results = [shelter for shelter in current if keyword in shelter.get('name', '')] if keyword else []
     return render_template('shelter_register.html', page='edit_search', keyword=keyword, results=results)
 
 
@@ -853,6 +948,7 @@ def shelter_form(mode):
         shelter = next((item for item in shelters if item.get('id') == shelter_id), None)
         if not shelter:
             return redirect(url_for('shelter_edit_search'))
+        shelter = normalize_shelter(shelter)
 
     if request.method == 'POST':
         image_path = save_uploaded_map(request.files.get('map_image')) or shelter.get('map_image', '')
@@ -899,7 +995,7 @@ def shelter_complete():
 def shelter_delete():
     shelter_id = request.form.get('shelter_id', type=int)
     target_index = next(
-        (index for index, shelter in enumerate(shelters) if shelter.get('id') == shelter_id),
+        (index for index, shelter in enumerate(shelters) if str(shelter.get('id')) == str(shelter_id)),
         None,
     )
     if target_index is None:
@@ -938,7 +1034,7 @@ def shelter_search():
 # 全施設一覧ページ
 @app.route('/all_shelters')
 def all_shelters():
-    results = [normalize_shelter(shelter, index) for index, shelter in enumerate(shelters)]
+    results = [normalize_shelter(shelter, index) for index, shelter in enumerate(current_shelters())]
     for item in results:
         item['_matched_facilities'] = 0
         item['_selected_facilities'] = []
@@ -950,12 +1046,22 @@ def all_shelters():
 
 @app.route('/board')
 def board():
-    shelter_towns = sorted({shelter.get('district', '').strip() for shelter in shelters if shelter.get('district')})
+    current = current_shelters()
+    return render_board_page(
+        current,
+        error=request.args.get('error'),
+    )
+
+
+def render_board_page(current, error=None, form_data=None):
+    shelter_towns = sorted({shelter.get('district', '').strip() for shelter in current if shelter.get('district')})
     return render_template(
         'board.html',
         instructions=board_instructions(),
-        shelters=shelters,
-        areas=shelter_towns,
+        shelters=current,
+        areas=['全域', *shelter_towns],
+        error=error,
+        form_data=form_data if form_data is not None else request.form,
         templates=(
             '今すぐ避難してください。',
             '周辺の安全を確認してください。',
@@ -969,6 +1075,7 @@ def board():
 @app.route('/board/create', methods=['POST'])
 @login_required
 def board_create():
+    current = current_shelters()
     translation_fields = {
         'ja': request.form.get('content', '').strip(),
         'en': request.form.get('content_en', '').strip(),
@@ -976,8 +1083,10 @@ def board_create():
         'ko': request.form.get('content_ko', '').strip(),
     }
     areas = request.form.getlist('areas')
-    available_areas = {shelter.get('district', '').strip() for shelter in shelters if shelter.get('district')}
-    selected_areas = [area for area in areas if area in available_areas]
+    available_areas = {shelter.get('district', '').strip() for shelter in current if shelter.get('district')}
+    selected_areas = [area for area in areas if area in ('全域', '青森市全域') or area in available_areas]
+    if '全域' in selected_areas or '青森市全域' in selected_areas:
+        selected_areas = ['全域']
     if request.form.get('input_mode') == 'template':
         content = request.form.get('template_content', '').strip()
         urgency = '高' if content == '今すぐ避難してください。' else '中'
@@ -988,14 +1097,16 @@ def board_create():
         translations = {lang: text for lang, text in translation_fields.items() if text}
     if urgency not in ('高', '中', '低'):
         urgency = '低'
-    if not content or not selected_areas:
-        return redirect(url_for('board'))
+    if not content:
+        return render_board_page(current, error='content', form_data=request.form)
+    if not selected_areas:
+        return render_board_page(current, error='area', form_data=request.form)
 
     selected_shelter_names = [
         name for name in request.form.getlist('shelters')
         if any(
-            shelter.get('name') == name and shelter.get('district', '').strip() in selected_areas
-            for shelter in shelters
+            shelter.get('name') == name and any(shelter_matches_area(shelter, area) for area in selected_areas)
+            for shelter in current
         )
     ]
 
