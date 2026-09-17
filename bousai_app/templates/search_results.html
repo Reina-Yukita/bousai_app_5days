@@ -1,20 +1,106 @@
 {% extends "base.html" %}
 
+{% block title %}避難所検索結果 | 防災アプリ{% endblock %}
+
 {% block content %}
-<h2>検索結果</h2>
+<section class="shelter-results-page">
+  <div class="results-heading">
+    <div>
+      <p class="section-eyebrow">SHELTER RESULTS</p>
+      <h2>避難所検索結果</h2>
+      {% if keyword %}<p class="results-summary">「{{ keyword }}」の検索結果</p>{% endif %}
+      {% if selected_district or selected_municipality or selected_facilities %}
+      <div class="selected-search-conditions" aria-label="検索条件">
+        {% if selected_district %}<span class="search-condition search-condition--district">{{ selected_district }}</span>{% endif %}
+        {% if selected_municipality %}<span class="search-condition search-condition--municipality">{{ selected_municipality }}</span>{% endif %}
+        {% for key in selected_facilities %}<span class="search-condition facility-condition--{{ key }}">{{ facility_options[key] }}</span>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <a class="button" href="{{ url_for('shelter_search') }}">条件を変更</a>
+  </div>
+
+  {% if results %}
+  <div id="searchShelterMap" class="map-box search-results-map" aria-label="検索結果の避難所マップ"></div>
+  <div class="shelter-result-list">
+    {% for shelter in results %}
+    {% set matched = shelter._matched_facilities %}
+    <article class="shelter-result-card{% if selected_facilities and matched %} shelter-result-card--matched{% else %} shelter-result-card--muted{% endif %}" data-marker-index="{{ loop.index0 }}" tabindex="0" role="button" aria-label="{{ shelter.name }}を地図で表示">
+      <div class="shelter-result-card__heading">
+        <h3>{{ shelter.name }}</h3>
+        {% set availability = shelter.availability|default('普通', true) %}
+        <span class="availability availability--{{ 'full' if availability == '満員' else 'available' if availability == '余裕あり' else 'normal' }}">
+          <span aria-hidden="true">{{ '😣😣😣' if availability == '満員' else '🙂' if availability == '余裕あり' else '😐😐' }}</span>
+          {{ availability }}
+        </span>
+      </div>
+      {% if shelter.address or shelter.district %}<p class="shelter-result-card__address">{{ shelter.district }} {{ shelter.address }}</p>{% endif %}
+      <div class="shelter-result-card__stats" aria-label="避難所の状況">
+        <span><strong>最大収容人数</strong> {{ shelter.capacity|default('未登録', true) }}人</span>
+        <span><strong>物資</strong> {{ shelter.supplies|default('十分足りている', true) }}</span>
+      </div>
+      {% if selected_facilities %}<p class="match-count">選択条件との一致: {{ matched }}件</p>{% endif %}
+      <div class="facility-tags" aria-label="設備・条件">
+        {% for key, label in facility_options.items() if shelter[key] %}
+        <span class="facility-tag facility-tag--{{ key }}{% if selected_facilities and key not in selected_facilities %} facility-tag--muted{% elif key in selected_facilities %} facility-tag--matched{% endif %}">{{ label }}</span>
+        {% endfor %}
+      </div>
+      <button class="attendance-button" type="button" data-attendance>出席</button>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">該当する避難所が見つかりませんでした。</p>
+  {% endif %}
+</section>
 
 {% if results %}
-  <ul>
-    {% for shelter in results %}
-    <li>{{ shelter.name }}</li>
-    {% endfor %}
-  </ul>
-{% else %}
-  <p>該当する避難所が見つかりませんでした</p>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const center = [40.8244, 140.7400];
+  const map = L.map('searchShelterMap').setView(center, 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    referrerPolicy: 'strict-origin-when-cross-origin'
+  }).addTo(map);
+  const shelters = {{ results|tojson }};
+  const markers = [];
+  shelters.forEach(function(shelter, index) {
+    const latitude = Number(shelter.latitude) || center[0] + (index % 3 - 1) * 0.012;
+    const longitude = Number(shelter.longitude) || center[1] + (Math.floor(index / 3) - 0.5) * 0.018;
+    const popup = document.createElement('strong');
+    popup.textContent = shelter.name || '避難所';
+    const marker = L.marker([latitude, longitude]).addTo(map).bindPopup(popup);
+    markers.push(marker);
+  });
+  document.querySelectorAll('[data-marker-index]').forEach(function(card) {
+    function showShelter() {
+      const marker = markers[Number(card.dataset.markerIndex)];
+      if (!marker) return;
+      map.setView(marker.getLatLng(), Math.max(map.getZoom(), 14));
+      marker.openPopup();
+      document.querySelector('#searchShelterMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    card.addEventListener('click', function(event) {
+      if (!event.target.closest('[data-attendance]')) showShelter();
+    });
+    card.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        showShelter();
+      }
+    });
+  });
+  document.querySelectorAll('[data-attendance]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      const attending = button.classList.toggle('is-attending');
+      button.textContent = attending ? '出席済み' : '出席';
+      button.setAttribute('aria-pressed', String(attending));
+    });
+  });
+});
+</script>
 {% endif %}
-
-<p>
-  <a href="/shelter_search">検索画面に戻る</a> |
-  <a href="/">トップページへ戻る</a>
-</p>
 {% endblock %}

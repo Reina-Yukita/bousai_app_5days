@@ -3,23 +3,237 @@
 {% block title %}指示・発信ボード - 防災アプリ{% endblock %}
 
 {% block content %}
-<h2>発信ボード</h2>
-<p>住民向けの発信を登録・確認できます。</p>
+<section class="board-page">
+  <div class="board-heading">
+    <p class="section-eyebrow">COMMUNITY NOTICES</p>
+    <h2>指示・発信ボード</h2>
+    {% if session.logged_in %}
+    <p>管理者として新しい情報を登録できます。</p>
+    {% else %}
+    <p>市民向けに発信されている防災情報を確認できます。</p>
+    {% endif %}
+  </div>
 
-<!-- 発信一覧 -->
-<h3>発信一覧</h3>
-{% if instructions %}
-<table border="1" cellpadding="5">
-  <tr>
-    <th>内容</th>
-  </tr>
-  {% for inst in instructions %}
-  <tr>
-    <td>{{ inst.content }}{% if inst.shelter %}（避難先: {{ inst.shelter }}）{% endif %}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<p>登録されている指示はありません。</p>
-{% endif %}
+  {% if session.logged_in %}
+  <details class="board-panel board-create" open>
+    <summary>新規発信</summary>
+    <form action="{{ url_for('board_create') }}" method="post">
+      <fieldset>
+        <legend>発信内容</legend>
+        <div class="input-mode" role="group" aria-label="入力方式">
+          <label><input type="radio" name="input_mode" value="free" checked>自由入力</label>
+          <label><input type="radio" name="input_mode" value="template">指示内容を選択</label>
+        </div>
+        <div class="input-mode-panel" data-mode="free">
+          <label for="content">内容</label>
+          <textarea id="content" name="content" rows="4" maxlength="500" placeholder="発信内容を入力してください"></textarea>
+          <div class="multilingual-inputs">
+            <label for="content_en">English <span class="field-note">任意</span></label>
+            <textarea id="content_en" name="content_en" rows="2" maxlength="500" placeholder="English message"></textarea>
+            <label for="content_zh">中文 <span class="field-note">任意</span></label>
+            <textarea id="content_zh" name="content_zh" rows="2" maxlength="500" placeholder="中文内容"></textarea>
+            <label for="content_ko">한국어 <span class="field-note">任意</span></label>
+            <textarea id="content_ko" name="content_ko" rows="2" maxlength="500" placeholder="한국어 내용"></textarea>
+          </div>
+          <fieldset class="urgency-options">
+            <legend>緊急度</legend>
+            <label><input type="radio" name="urgency" value="高"> 高</label>
+            <label><input type="radio" name="urgency" value="中"> 中</label>
+            <label><input type="radio" name="urgency" value="低" checked> 低</label>
+          </fieldset>
+        </div>
+        <div class="input-mode-panel" data-mode="template" hidden>
+          <label for="template_content">テンプレート</label>
+          <select id="template_content" name="template_content">
+            {% for item in templates %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+          </select>
+        </div>
+      </fieldset>
+      <details class="board-area-picker">
+        <summary>対象地域を選択</summary>
+        <fieldset class="shelter-check-list">
+          <legend class="visually-hidden">対象地域</legend>
+          {% for area in areas %}<label><input type="checkbox" name="areas" value="{{ area }}"> {{ area }}</label>
+          {% else %}<span class="field-note">登録されている避難所町名はありません。</span>{% endfor %}
+        </fieldset>
+      </details>
+      <fieldset id="shelter-selection" hidden>
+        <legend>避難先 <span class="field-note">任意</span></legend>
+        <div class="shelter-check-list">
+          {% for shelter in shelters %}
+          <label data-shelter-district="{{ shelter.district|default('')|trim }}" data-shelter-address="{{ shelter.address|default('')|trim }}"><input type="checkbox" name="shelters" value="{{ shelter.name }}">{{ shelter.name }}</label>
+          {% else %}<span class="field-note">登録されている避難所はありません。</span>{% endfor %}
+        </div>
+      </fieldset>
+      <button class="button" type="submit">発信する</button>
+    </form>
+  </details>
+  {% endif %}
+
+  <section class="board-panel board-list">
+    <div class="board-list-heading">
+      <h3>発信一覧</h3>
+      <span class="field-note">{{ instructions|length }}件</span>
+    </div>
+    {% if session.logged_in and instructions %}
+    <div class="board-actions">
+      <form action="{{ url_for('board_resolve') }}" method="post" data-selection-form>
+        <button class="button button-secondary" type="submit">解除</button>
+      </form>
+      <form action="{{ url_for('board_delete') }}" method="post" data-selection-form>
+        <button class="button button-danger" type="submit">削除</button>
+      </form>
+    </div>
+    {% endif %}
+    {% if instructions %}
+    <div class="board-table-layout">
+      <div class="board-table-wrap">
+        <table class="board-table" id="boardTable">
+          <thead>
+            <tr>
+              {% if session.logged_in %}<th class="select-column"><label class="visually-hidden" for="selectAll">全件選択</label><input id="selectAll" type="checkbox" aria-label="全件選択"></th>{% endif %}
+              <th><button type="button" data-sort="urgency">緊急度 <span aria-hidden="true">↕</span></button></th>
+              <th><button type="button" data-sort="status">状態 <span aria-hidden="true">↕</span></button></th>
+              <th><button type="button" data-sort="area">対象地域 <span aria-hidden="true">↕</span></button></th>
+              <th>内容</th>
+              <th>避難先</th>
+              <th><button type="button" data-sort="created">発信日時 <span aria-hidden="true">↕</span></button></th>
+              <th><button type="button" data-sort="resolved">解除日時 <span aria-hidden="true">↕</span></button></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in instructions %}
+            <tr data-urgency="{{ item.urgency }}" data-status="{{ item.status }}" data-area="{{ item.area }}" data-shelters="{{ item.shelters|join('、') if item.shelters else '' }}" data-created="{{ item.created_at }}" data-resolved="{{ item.resolved_at or '' }}" class="urgency-row--{{ 'high' if item.urgency == '高' else 'medium' if item.urgency == '中' else 'low' }}{% if item.status == '解除済' %} is-resolved{% endif %}">
+              {% if session.logged_in %}<td><input type="checkbox" name="selected_ids" value="{{ item.id }}" data-selection></td>{% endif %}
+              <td><span class="urgency-label urgency-label--{{ 'high' if item.urgency == '高' else 'medium' if item.urgency == '中' else 'low' }}">{{ item.urgency }}</span></td>
+              <td><span class="status-label">{{ item.status }}</span></td>
+              <td>{{ item.area }}</td>
+              <td class="board-content">{{ item.content }}</td>
+              <td>{% if item.shelters %}{{ item.shelters|join('、') }}{% else %}－{% endif %}</td>
+              <td>{{ item.created_at_display or item.created_at or '－' }}</td>
+              <td>{{ item.resolved_at_display or item.resolved_at or '－' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <aside class="board-filter-panel" aria-label="発信一覧のフィルタ">
+        <h4>フィルタ</h4>
+        <details class="filter-group" open>
+          <summary>状態</summary>
+          <label><input type="checkbox" name="filter_status" value="発信中" checked> 発信中</label>
+          <label><input type="checkbox" name="filter_status" value="解除済" checked> 解除済</label>
+        </details>
+        <details class="filter-group" open>
+          <summary>緊急度</summary>
+          <label><input type="checkbox" name="filter_urgency" value="高" checked> 高</label>
+          <label><input type="checkbox" name="filter_urgency" value="中" checked> 中</label>
+          <label><input type="checkbox" name="filter_urgency" value="低" checked> 低</label>
+        </details>
+        <details class="filter-group" open>
+          <summary>対象地域</summary>
+          {% for area in areas %}<label><input type="checkbox" name="filter_area" value="{{ area }}" checked> {{ area }}</label>{% endfor %}
+        </details>
+        <details class="filter-group" open>
+          <summary>避難所</summary>
+          {% for shelter in shelters %}<label><input type="checkbox" name="filter_shelter" value="{{ shelter.name }}" checked> {{ shelter.name }}</label>{% endfor %}
+        </details>
+        <button type="button" class="button filter-apply" id="applyBoardFilters">適用</button>
+      </aside>
+    </div>
+    {% else %}<p class="empty-state">登録されている発信はありません。</p>{% endif %}
+  </section>
+</section>
+<script>
+  const modeInputs = document.querySelectorAll('input[name="input_mode"]');
+  modeInputs.forEach(input => input.addEventListener('change', () => {
+    document.querySelectorAll('.input-mode-panel').forEach(panel => {
+      panel.hidden = panel.dataset.mode !== document.querySelector('input[name="input_mode"]:checked').value;
+    });
+  }));
+  const selectAll = document.querySelector('#selectAll');
+  const selected = () => document.querySelectorAll('[data-selection]');
+  selectAll?.addEventListener('change', () => selected().forEach(item => item.checked = selectAll.checked));
+  document.querySelectorAll('[data-selection-form]').forEach(form => form.addEventListener('submit', event => {
+    selected().forEach(item => {
+      if (item.checked) {
+        const copy = document.createElement('input');
+        copy.type = 'hidden'; copy.name = 'selected_ids'; copy.value = item.value; form.appendChild(copy);
+      }
+    });
+    if (![...selected()].some(item => item.checked)) { event.preventDefault(); }
+  }));
+  const areaChecks = [...document.querySelectorAll('input[name="areas"]')];
+  const shelterLabels = [...document.querySelectorAll('[data-shelter-district]')];
+  const shelterSelection = document.querySelector('#shelter-selection');
+  function matchesAreaFilter(shelterLabel, selectedAreas) {
+    const district = (shelterLabel.dataset.shelterDistrict || '').trim();
+    const address = (shelterLabel.dataset.shelterAddress || '').trim();
+    return selectedAreas.some(area => {
+      const areaValue = area.trim();
+      if (!areaValue) return false;
+      return (district && district.includes(areaValue)) || (address && address.includes(areaValue)) || (areaValue.includes(district)) || (areaValue.includes(address));
+    });
+  }
+  function updateShelterChoices() {
+    const selectedAreas = areaChecks.filter(input => input.checked).map(input => input.value);
+    if (shelterSelection) shelterSelection.hidden = selectedAreas.length === 0;
+    shelterLabels.forEach(label => {
+      const visible = matchesAreaFilter(label, selectedAreas);
+      label.hidden = !visible;
+      if (!visible) {
+        const input = label.querySelector('input');
+        if (input) input.checked = false;
+      }
+    });
+  }
+  areaChecks.forEach(input => input.addEventListener('change', updateShelterChoices));
+  updateShelterChoices();
+
+  function applyBoardFilters() {
+    const statusFilter = [...document.querySelectorAll('input[name="filter_status"]:checked')].map(item => item.value);
+    const urgencyFilter = [...document.querySelectorAll('input[name="filter_urgency"]:checked')].map(item => item.value);
+    const areaFilter = [...document.querySelectorAll('input[name="filter_area"]:checked')].map(item => item.value);
+    const shelterFilter = [...document.querySelectorAll('input[name="filter_shelter"]:checked')].map(item => item.value);
+    const rows = [...document.querySelectorAll('#boardTable tbody tr')];
+    rows.forEach(row => {
+      const status = row.dataset.status || '';
+      const urgency = row.dataset.urgency || '';
+      const area = row.dataset.area || '';
+      const shelters = (row.dataset.shelters || '').split('、').filter(Boolean);
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(status);
+      const matchesUrgency = urgencyFilter.length === 0 || urgencyFilter.includes(urgency);
+      const matchesArea = areaFilter.length === 0 || areaFilter.includes(area);
+      const matchesShelter = shelterFilter.length === 0 || shelters.some(value => shelterFilter.includes(value));
+      row.hidden = !(matchesStatus && matchesUrgency && matchesArea && matchesShelter);
+    });
+  }
+  document.querySelector('#applyBoardFilters')?.addEventListener('click', applyBoardFilters);
+  document.querySelectorAll('input[name="filter_status"], input[name="filter_urgency"], input[name="filter_area"], input[name="filter_shelter"]').forEach(input => input.addEventListener('change', () => {
+    if (input.closest('.board-filter-panel')) {
+      applyBoardFilters();
+    }
+  }));
+  applyBoardFilters();
+  document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
+    const table = document.querySelector('#boardTable');
+    const body = table.tBodies[0];
+    const rows = [...body.rows];
+    const key = button.dataset.sort;
+    const descending = button.dataset.direction !== 'desc';
+    const urgencyOrder = { '高': 3, '中': 2, '低': 1 };
+    button.dataset.direction = descending ? 'desc' : 'asc';
+    rows.sort((a, b) => {
+      const aValue = a.dataset[key] || '';
+      const bValue = b.dataset[key] || '';
+      if (key === 'urgency') {
+        return descending
+          ? urgencyOrder[bValue] - urgencyOrder[aValue]
+          : urgencyOrder[aValue] - urgencyOrder[bValue];
+      }
+      return descending ? bValue.localeCompare(aValue, 'ja') : aValue.localeCompare(bValue, 'ja');
+    });
+    rows.forEach(row => body.appendChild(row));
+  }));
+</script>
 {% endblock %}

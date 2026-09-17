@@ -1,118 +1,90 @@
 <!doctype html>
-<html lang="ja">
+<html lang="{{ current_language }}">
 <head>
   <meta charset="utf-8">
   <title>{% block title %}防災アプリ{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    :root {
-      --primary-blue: #2459ad;
-      --deep-blue: #1d4d9c;
-      --page-bg: #f7f9fc;
-      --text: #25344a;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background: var(--page-bg);
-      color: var(--text);
-      font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
-    }
-
-    .app-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 70px;
-      padding: 0 max(24px, calc((100vw - 1360px) / 2));
-      color: #fff;
-      background: linear-gradient(115deg, var(--deep-blue), #3264b6);
-      box-shadow: 0 2px 8px rgba(21, 55, 111, 0.18);
-    }
-
-    .app-title {
-      margin: 0;
-      font-size: 26px;
-      letter-spacing: 0.04em;
-    }
-
-    .menu-toggle {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 8px;
-      border: 0;
-      background: transparent;
-      cursor: pointer;
-    }
-
-    .menu-toggle span {
-      display: block;
-      width: 23px;
-      height: 3px;
-      border-radius: 2px;
-      background: #fff;
-    }
-
-    .site-nav {
-      display: none;
-      padding: 12px max(24px, calc((100vw - 1360px) / 2));
-      background: #fff;
-      border-bottom: 1px solid #dfe6f0;
-      text-align: right;
-    }
-
-    .site-nav.is-open { display: block; }
-
-    .site-nav a {
-      margin-left: 18px;
-      color: var(--primary-blue);
-      text-decoration: none;
-      font-weight: 700;
-    }
-
-    main { min-height: calc(100vh - 70px); }
-
-    @media (max-width: 600px) {
-      .app-header { min-height: 60px; padding: 0 16px; }
-      .app-title { font-size: 21px; }
-      .site-nav { padding: 10px 16px; text-align: left; }
-      .site-nav a { display: block; margin: 8px 0; }
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="app-header">
-    <h1 class="app-title">防災アプリ</h1>
-    <button class="menu-toggle" type="button" aria-label="メニューを開く" aria-expanded="false" aria-controls="siteNav">
-      <span></span><span></span><span></span>
-    </button>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icon-cloud" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 8.5 4.75 4.75 0 0 0 7 18Z"/></symbol>
+    <symbol id="icon-map" viewBox="0 0 24 24"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15M15 6v15"/></symbol>
+    <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="icon-warning" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5M12 17h.01"/></symbol>
+    <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/></symbol>
+    <symbol id="icon-person" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3"/><path d="M5 21a7 7 0 0 1 14 0"/></symbol>
+    <symbol id="icon-plan" viewBox="0 0 24 24"><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></symbol>
+    <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  </svg>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="hero-kicker">{{ t('hero_kicker') }}</p>
+      <h1 class="brand">{{ t('brand') }}</h1>
+      <p class="hero-location"><svg class="icon"><use href="#icon-pin"></use></svg>{{ t('location_label') }}</p>
+      <div id="statusChip" class="status-chip" aria-live="polite"><svg class="icon"><use href="#icon-check"></use></svg><span>{{ t('status_ok') }}</span></div>
+      <div class="header-controls">
+        <form class="language-switcher" method="post" action="{{ url_for('set_language') }}">
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <label class="sr-only" for="languageSelect">{{ t('language') }}</label>
+          <select id="languageSelect" name="lang" onchange="this.form.submit()" aria-label="{{ t('language') }}">
+            {% for code, label in supported_languages.items() %}
+              <option value="{{ code }}"{% if current_language == code %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        <button class="menu-button" id="menuButton" type="button" aria-label="{{ t('menu_button') }}" aria-expanded="false" aria-controls="siteNav"><svg class="icon"><use href="#icon-menu"></use></svg></button>
+      </div>
+    </div>
   </header>
 
-  <nav class="site-nav" id="siteNav">
-    <a href="/">ホーム</a>
-    <a href="/shelter_search">避難所検索</a>
-    <a href="/shelter_register">避難所登録</a>
-    <a href="/board">指示・発信ボード</a>
-    {% if session.logged_in %}
-      <a href="/logout">ログアウト</a>
-    {% else %}
-      <a href="/login">ログイン</a>
-    {% endif %}
+  <nav class="nav-panel" id="siteNav" aria-label="メインナビゲーション">
+    <div class="tab-bar">
+      <a class="tab-link" href="{{ url_for('index') }}"{% if request.path == '/' %} aria-current="page"{% endif %}>{{ t('nav_home') }}</a>
+      <a class="tab-link" href="{{ url_for('shelter_search') }}"{% if request.path in ['/shelter_search', '/all_shelters', '/search_results'] %} aria-current="page"{% endif %}>{{ t('nav_shelter_search') }}</a>
+      <a class="tab-link" href="{{ url_for('board') }}"{% if request.path == '/board' %} aria-current="page"{% endif %}>{{ t('nav_board') }}</a>
+      {% if session.logged_in %}
+      <a class="utility-link" href="{{ url_for('shelter_register') }}"{% if request.path.startswith('/shelter_register') %} aria-current="page"{% endif %}>{{ t('nav_register') }}</a>
+      <a class="utility-link" href="{{ url_for('logout') }}">{{ t('nav_logout') }}</a>
+      {% else %}
+      <a class="utility-link" href="{{ url_for('login') }}"{% if request.path == '/login' %} aria-current="page"{% endif %}>{{ t('nav_login') }}</a>
+      {% endif %}
+    </div>
   </nav>
 
-  <main>
+  <main class="main-shell">
+    <div class="alert-banner alert-banner--level-3" id="alertBanner" role="alert" aria-live="polite" hidden>
+      <svg class="icon" aria-hidden="true"><use href="#icon-warning"></use></svg>
+      <div><strong id="alertTitle">警報・注意報があります</strong><span id="alertStatus">発表状態を確認してください</span></div>
+      <a href="{{ url_for('index') }}#weatherPanel">詳細を見る →</a>
+    </div>
     {% block content %}{% endblock %}
   </main>
+
   <script>
-    const menuToggle = document.querySelector('.menu-toggle');
+    const menuButton = document.querySelector('#menuButton');
     const siteNav = document.querySelector('#siteNav');
-    menuToggle.addEventListener('click', function() {
+    menuButton.addEventListener('click', function() {
       const isOpen = siteNav.classList.toggle('is-open');
-      menuToggle.setAttribute('aria-expanded', isOpen);
+      menuButton.setAttribute('aria-expanded', isOpen);
     });
+    fetch('{{ url_for('api_weather_warnings') }}').then(response => response.json()).then(data => {
+      const warnings = data.warnings || [];
+      const level = warnings.reduce((max, warning) => Math.max(max, warning.level || 2), 0);
+      const chip = document.querySelector('#statusChip');
+      const banner = document.querySelector('#alertBanner');
+      chip.className = `status-chip${level ? ` status-chip--level-${level}` : ''}`;
+      chip.innerHTML = level ? `<span class="status-chip__level">警戒レベル ${level}</span><span>{{ t('status_warning') }}</span>` : '<svg class="icon"><use href="#icon-check"></use></svg><span>{{ t('status_ok') }}</span>';
+      if (level >= 3) {
+        banner.hidden = false;
+        banner.className = `alert-banner alert-banner--level-${level}`;
+        document.querySelector('#alertTitle').textContent = warnings[0].name || '警報が発表されています';
+        document.querySelector('#alertStatus').textContent = `${warnings[0].status || '発表'}・青森市`;
+      }
+    }).catch(() => { document.querySelector('#statusChip').innerHTML = '<svg class="icon"><use href="#icon-warning"></use></svg><span>{{ t('status_fetch_error') }}</span>'; });
   </script>
 </body>
 </html>

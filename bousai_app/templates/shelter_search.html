@@ -1,8 +1,106 @@
 {% extends "base.html" %}
 
-{% block content %}
-<h2>避難所検索</h2>
-<p>登録されている避難所を確認できます。</p>
+{% block title %}{{ t('search_heading') }} | {{ t('brand') }}{% endblock %}
 
-<p><a href="/all_shelters">全施設一覧</a></p>
+{% block content %}
+<section class="shelter-search-page">
+	<div class="shelter-search-heading">
+		<div>
+			<p class="section-eyebrow">SHELTER SEARCH</p>
+			<h2>{{ t('search_heading') }}</h2>
+		</div>
+		<div class="location-status" aria-live="polite">
+			<span class="location-status__icon" aria-hidden="true">📍</span>
+			<span id="locationText">{{ t('search_location_getting') }}</span>
+			<button class="location-status__button" id="locateButton" type="button">{{ t('search_location_refresh') }}</button>
+		</div>
+	</div>
+
+	<form class="shelter-search-form" method="get" action="{{ url_for('shelter_search') }}">
+		<div class="shelter-search-fields">
+			<label>
+				<span>{{ t('search_town_label') }}</span>
+				<select id="district" name="district">
+					<option value="">{{ t('search_select_none') }}</option>
+					{% for town in shelter_towns %}<option value="{{ town }}">{{ town }}</option>{% endfor %}
+				</select>
+			</label>
+			<label class="shelter-name-field">
+				<span>{{ t('search_name_label') }}</span>
+				<input type="text" name="name" placeholder="{{ t('search_name_placeholder') }}">
+			</label>
+			<button class="button shelter-search-submit" type="submit">{{ t('search_button') }}</button>
+		</div>
+
+		<fieldset class="facility-options">
+			<legend>{{ t('search_conditions') }}</legend>
+			<div class="facility-toggle-list">
+				<button class="facility-toggle facility-toggle--shortest" type="button" data-facility="shortest" aria-pressed="false"><span class="facility-icon" aria-hidden="true">⏱️</span><span>最短</span></button>
+				<button class="facility-toggle facility-toggle--barrier-free" type="button" data-facility="barrier_free" aria-pressed="false"><span class="facility-icon" aria-hidden="true">♿</span><span>バリアフリー</span></button>
+				<button class="facility-toggle facility-toggle--parking" type="button" data-facility="parking" aria-pressed="false"><span class="facility-icon" aria-hidden="true">🅿️</span><span>駐車場あり</span></button>
+				<button class="facility-toggle facility-toggle--nursing" type="button" data-facility="nursing_room" aria-pressed="false"><span class="facility-icon" aria-hidden="true">🍼</span><span>授乳室あり</span></button>
+				<button class="facility-toggle facility-toggle--pets" type="button" data-facility="pets_allowed" aria-pressed="false"><span class="facility-icon" aria-hidden="true">🐾</span><span>ペット可</span></button>
+				<button class="facility-toggle facility-toggle--universal" type="button" data-facility="universal_design" aria-pressed="false"><span class="facility-icon" aria-hidden="true">👀</span><span>ユニバーサルデザイン</span></button>
+				<button class="facility-toggle facility-toggle--worship" type="button" data-facility="prayer_room" aria-pressed="false"><span class="facility-icon" aria-hidden="true">🛐</span><span>礼拝室あり</span></button>
+				<button class="facility-toggle facility-toggle--air-conditioning" type="button" data-facility="air_conditioning" aria-pressed="false"><span class="facility-icon" aria-hidden="true">❄️</span><span>空調完備</span></button>
+				<button class="facility-toggle facility-toggle--large" type="button" data-facility="large_facility" aria-pressed="false"><span class="facility-icon" aria-hidden="true">🏢</span><span>大規模施設</span></button>
+			</div>
+		</fieldset>
+	</form>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+	const districtSelect = document.querySelector('#district');
+	const locationText = document.querySelector('#locationText');
+	const locateButton = document.querySelector('#locateButton');
+	const form = document.querySelector('.shelter-search-form');
+
+	function showLocation(position) {
+		const accuracy = Math.round(position.coords.accuracy);
+		const latitude = position.coords.latitude;
+		const longitude = position.coords.longitude;
+		locationText.textContent = '市区町村名を取得中...';
+		fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`, { headers: { Accept: 'application/json' } })
+			.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('reverse geocoding failed')); })
+			.then(function(data) {
+				const address = data.address || {};
+				const city = address.city || address.town || address.village || address.municipality;
+				locationText.textContent = `${city || '市区町村名不明'}（誤差約${accuracy}m）`;
+			})
+			.catch(function() { locationText.textContent = `市区町村名不明（誤差約${accuracy}m）`; });
+	}
+
+	function locate() {
+		if (!navigator.geolocation) {
+			locationText.textContent = '市区町村名不明';
+			return;
+		}
+		locationText.textContent = '現在地を取得中...';
+		navigator.geolocation.getCurrentPosition(showLocation, function() {
+			locationText.textContent = '市区町村名不明';
+		}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 });
+	}
+
+	locateButton.addEventListener('click', locate);
+	form.querySelectorAll('.facility-toggle').forEach(function(button) {
+		button.addEventListener('click', function() {
+			const selected = button.classList.toggle('is-selected');
+			button.setAttribute('aria-pressed', String(selected));
+			const existingInput = form.querySelector(`input[name="facility"][value="${CSS.escape(button.dataset.facility)}"]`);
+			if (selected && !existingInput) {
+				const input = document.createElement('input');
+				input.type = 'hidden';
+				input.name = 'facility';
+				input.value = button.dataset.facility;
+				form.appendChild(input);
+			} else if (!selected && existingInput) {
+				existingInput.remove();
+			}
+		});
+	});
+
+	locate();
+});
+</script>
 {% endblock %}
